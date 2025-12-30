@@ -1,0 +1,7 @@
+{
+  "name": "Smart English - LMS",
+  "description": "A comprehensive online class management system for Smart English, featuring student registration, QR-based digital IDs, and a hidden staff administrative portal.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
