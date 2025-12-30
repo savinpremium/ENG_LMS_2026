@@ -1,84 +1,79 @@
-import { ref, set, get, remove, onValue, push, child } from "firebase/database";
-import { db } from "./firebase";
 import { Student, PaymentRecord, AttendanceRecord } from "../types";
 
-const STUDENTS_PATH = 'students';
-const PAYMENTS_PATH = 'payments';
-const ATTENDANCE_PATH = 'attendance';
+const STUDENTS_KEY = 'se_students';
+const PAYMENTS_KEY = 'se_payments';
+const ATTENDANCE_KEY = 'se_attendance';
+
+// Helper to get from local storage
+const getLocal = <T>(key: string, fallback: T): T => {
+  const data = localStorage.getItem(key);
+  return data ? JSON.parse(data) : fallback;
+};
+
+// Helper to save to local storage
+const saveLocal = (key: string, data: any) => {
+  localStorage.setItem(key, JSON.stringify(data));
+  // Dispatch a custom event to simulate real-time updates for the same window
+  window.dispatchEvent(new Event('storage_update'));
+};
 
 export const storageService = {
   // --- STUDENTS ---
   subscribeToStudents: (callback: (students: Student[]) => void) => {
-    const studentsRef = ref(db, STUDENTS_PATH);
-    return onValue(studentsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const studentList = Object.keys(data).map(key => ({
-          ...data[key]
-        })) as Student[];
-        callback(studentList);
-      } else {
-        callback([]);
-      }
-    });
+    const update = () => callback(getLocal(STUDENTS_KEY, []));
+    update();
+    window.addEventListener('storage_update', update);
+    return () => window.removeEventListener('storage_update', update);
   },
 
   // --- PAYMENTS ---
   subscribeToPayments: (callback: (payments: PaymentRecord[]) => void) => {
-    const paymentsRef = ref(db, PAYMENTS_PATH);
-    return onValue(paymentsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const paymentList = Object.keys(data).map(key => ({
-          ...data[key]
-        })) as PaymentRecord[];
-        callback(paymentList);
-      } else {
-        callback([]);
-      }
-    });
+    const update = () => callback(getLocal(PAYMENTS_KEY, []));
+    update();
+    window.addEventListener('storage_update', update);
+    return () => window.removeEventListener('storage_update', update);
   },
 
   uploadPayment: async (payment: Omit<PaymentRecord, 'id' | 'uploadedAt' | 'status'>): Promise<void> => {
+    const payments = getLocal<PaymentRecord[]>(PAYMENTS_KEY, []);
     const paymentId = `${payment.studentId}_${payment.month}`;
-    const paymentRef = ref(db, `${PAYMENTS_PATH}/${paymentId}`);
+    
+    // Replace existing if same month
+    const filtered = payments.filter(p => p.id !== paymentId);
+    
     const newRecord: PaymentRecord = {
       ...payment,
       id: paymentId,
       uploadedAt: Date.now(),
       status: 'pending'
     };
-    await set(paymentRef, newRecord);
+    
+    saveLocal(PAYMENTS_KEY, [...filtered, newRecord]);
   },
 
   updatePaymentStatus: async (paymentId: string, status: 'approved' | 'rejected'): Promise<void> => {
-    const statusRef = ref(db, `${PAYMENTS_PATH}/${paymentId}/status`);
-    await set(statusRef, status);
+    const payments = getLocal<PaymentRecord[]>(PAYMENTS_KEY, []);
+    const updated = payments.map(p => p.id === paymentId ? { ...p, status } : p);
+    saveLocal(PAYMENTS_KEY, updated);
   },
 
   // --- ATTENDANCE ---
   subscribeToAttendance: (callback: (attendance: AttendanceRecord[]) => void) => {
-    const attRef = ref(db, ATTENDANCE_PATH);
-    return onValue(attRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const list = Object.keys(data).map(key => ({
-          ...data[key]
-        })) as AttendanceRecord[];
-        callback(list);
-      } else {
-        callback([]);
-      }
-    });
+    const update = () => callback(getLocal(ATTENDANCE_KEY, []));
+    update();
+    window.addEventListener('storage_update', update);
+    return () => window.removeEventListener('storage_update', update);
   },
 
   markAttendance: async (studentId: string, week: 1 | 2 | 3 | 4): Promise<void> => {
     const now = new Date();
-    const month = now.toISOString().slice(0, 7); // YYYY-MM
-    const date = now.toISOString().split('T')[0]; // YYYY-MM-DD
-    const id = `${studentId}_${month}_${week}`; // Deterministic key: 1 per week
+    const month = now.toISOString().slice(0, 7);
+    const date = now.toISOString().split('T')[0];
+    const id = `${studentId}_${month}_${week}`;
     
-    const attRef = ref(db, `${ATTENDANCE_PATH}/${id}`);
+    const attendance = getLocal<AttendanceRecord[]>(ATTENDANCE_KEY, []);
+    if (attendance.some(a => a.id === id)) return; // Already marked
+
     const record: AttendanceRecord = {
       id,
       studentId,
@@ -87,30 +82,34 @@ export const storageService = {
       date,
       status: 'present'
     };
-    await set(attRef, record);
+    
+    saveLocal(ATTENDANCE_KEY, [...attendance, record]);
   },
 
   // --- UTILS ---
   onConnectionChange: (callback: (online: boolean) => void) => {
-    const connectedRef = ref(db, ".info/connected");
-    const unsubscribe = onValue(connectedRef, (snap) => {
-      callback(!!snap.val());
-    });
-    return unsubscribe;
+    const handle = () => callback(navigator.onLine);
+    window.addEventListener('online', handle);
+    window.addEventListener('offline', handle);
+    handle();
+    return () => {
+      window.removeEventListener('online', handle);
+      window.removeEventListener('offline', handle);
+    };
   },
 
   saveStudent: async (student: Student): Promise<void> => {
-    const studentRef = ref(db, `${STUDENTS_PATH}/${student.id}`);
-    await set(studentRef, student);
+    const students = getLocal<Student[]>(STUDENTS_KEY, []);
+    saveLocal(STUDENTS_KEY, [...students, student]);
   },
 
   deleteStudent: async (id: string): Promise<void> => {
-    const studentRef = ref(db, `${STUDENTS_PATH}/${id}`);
-    await remove(studentRef);
+    const students = getLocal<Student[]>(STUDENTS_KEY, []);
+    saveLocal(STUDENTS_KEY, students.filter(s => s.id !== id));
   },
 
   generateStudentId: (): string => {
     const random = Math.floor(1000 + Math.random() * 9000);
-    return `stu-${random}`;
+    return `STU-${random}`;
   }
 };
