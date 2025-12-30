@@ -82,7 +82,7 @@
       }
     </style>
 
-    <!-- Simplified Import Map -->
+    <!-- Corrected Import Map -->
     <script type="importmap">
 {
   "imports": {
@@ -108,18 +108,20 @@
 
     <div id="root"></div>
 
+    <!-- Ensure index.tsx is loaded as a module -->
     <script type="module" src="./index.tsx"></script>
     
     <script>
       // Graceful removal of loader
       window.addEventListener('load', () => {
+        // We delay slightly to ensure the browser has had a chance to start executing the JS
         setTimeout(() => {
           const loader = document.getElementById('initial-loader');
           if (loader) {
             loader.style.opacity = '0';
             setTimeout(() => loader.remove(), 500);
           }
-        }, 1500);
+        }, 1000);
       });
     </script>
   </body>
